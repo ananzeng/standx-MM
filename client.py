@@ -117,6 +117,11 @@ class StandXClient:
         )
         resp.raise_for_status()
         data = resp.json()
+        logger.debug("query_positions raw: %s", data)
         if isinstance(data, list):
             return data
-        return data.get("positions", [])
+        if isinstance(data, dict):
+            for key in ("rows", "positions", "data", "result"):
+                if key in data and isinstance(data[key], list):
+                    return data[key]
+        return []

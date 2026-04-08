@@ -48,7 +48,7 @@ class MakerStrategy:
     def _checkAndClosePositions(self) -> bool:
         positions = self.client.getPositions(config.symbol)
         for pos in positions:
-            qty = float(pos.get("quantity", 0))
+            qty = float(pos.get("qty", 0))
             if qty == 0:
                 continue
 

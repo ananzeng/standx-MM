@@ -1,7 +1,7 @@
 import csv
 import os
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -18,8 +18,11 @@ def _ensureHeader(filePath: str, header: list):
             csv.writer(f).writerow(header)
 
 
+TZ_UTC8 = timezone(timedelta(hours=8))
+
+
 def _now() -> str:
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    return datetime.now(TZ_UTC8).strftime("%Y-%m-%d %H:%M:%S")
 
 
 def _appendRow(filePath: str, row: list):

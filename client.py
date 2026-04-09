@@ -26,6 +26,20 @@ class StandXClient:
         resp.raise_for_status()
         return float(resp.json()["mark_price"])
 
+    def getPositionConfig(self, symbol: str = None) -> dict:
+        symbol = symbol or config.symbol
+        resp = requests.get(
+            f"{self.baseUrl}/api/query_position_config",
+            params={"symbol": symbol},
+            headers=self.auth.getHeaders(),
+            timeout=10,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if isinstance(data, dict) and "result" in data:
+            return data["result"]
+        return data
+
     def getSymbolInfo(self, symbol: str = None) -> dict:
         symbol = symbol or config.symbol
         resp = requests.get(
@@ -62,6 +76,21 @@ class StandXClient:
         }
         result = self._signedPost("/api/new_order", payload).json()
         logger.info("Order placed: %s %s @ %s (%s) response=%s", side, qty, price, symbol, result)
+        return result
+
+    def limitClose(self, side: str, price: float, qty: float, symbol: str = None) -> dict:
+        symbol = symbol or config.symbol
+        payload = {
+            "symbol": symbol,
+            "side": side,
+            "order_type": "limit",
+            "qty": str(qty),
+            "price": str(price),
+            "time_in_force": "gtc",
+            "reduce_only": True,
+        }
+        result = self._signedPost("/api/new_order", payload).json()
+        logger.info("Limit close: %s %s @ %s (%s)", side, qty, price, symbol)
         return result
 
     def marketClose(self, side: str, qty: float, symbol: str = None) -> dict:

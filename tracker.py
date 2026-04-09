@@ -3,13 +3,32 @@ import os
 import logging
 from datetime import datetime, timezone, timedelta
 
+import config
+
 logger = logging.getLogger(__name__)
 
 ORDERS_FILE = "orders.csv"
 TRADES_FILE = "trades.csv"
 
-ORDERS_HEADER = ["time", "event", "side", "price", "mark_price", "spread_bps", "size", "order_id"]
+ORDERS_HEADER = ["time", "event", "side", "price", "mark_price", "spread_bps", "size", "leverage", "est_points", "order_id"]
 TRADES_HEADER = ["fill_time", "close_time", "side", "entry_price", "exit_price", "size", "pnl_usd", "pnl_bps"]
+
+def estimateMultiplier(spreadBps: float) -> float:
+    if spreadBps < 0:
+        return 0
+    if spreadBps <= 10:
+        return 2.00 - (spreadBps / 10) * (2.00 - 0.80)
+    if spreadBps <= 30:
+        return 0.80 - ((spreadBps - 10) / 20) * (0.80 - 0.25)
+    if spreadBps <= 100:
+        return 0.25 - ((spreadBps - 30) / 70) * 0.25
+    return 0
+
+
+def estimateOrderPoints(size: float, markPrice: float, spreadBps: float) -> float:
+    notional = size * markPrice
+    dailyPoints = notional * estimateMultiplier(spreadBps)
+    return dailyPoints * config.refreshInterval / 86400
 
 
 def _ensureHeader(filePath: str, header: list):
@@ -35,15 +54,16 @@ class OrderTracker:
         _ensureHeader(ORDERS_FILE, ORDERS_HEADER)
         _ensureHeader(TRADES_FILE, TRADES_HEADER)
 
-    def recordPlace(self, orderId, side: str, price: float, markPrice: float, spreadBps: float, size: float):
-        _appendRow(ORDERS_FILE, [_now(), "place", side, price, markPrice, spreadBps, size, orderId])
+    def recordPlace(self, orderId, side: str, price: float, markPrice: float, spreadBps: float, size: float, leverage: int):
+        estPoints = estimateOrderPoints(size, markPrice, spreadBps)
+        _appendRow(ORDERS_FILE, [_now(), "place", side, price, markPrice, spreadBps, size, leverage, f"{estPoints:.3f}", orderId])
 
     def recordCancel(self, count: int):
-        _appendRow(ORDERS_FILE, [_now(), "cancel_all", "", "", "", "", "", f"x{count}"])
+        _appendRow(ORDERS_FILE, [_now(), "cancel_all", "", "", "", "", "", "", "", f"x{count}"])
 
     def recordFill(self, side: str, qty: float, entryPrice: float) -> dict:
         now = _now()
-        _appendRow(ORDERS_FILE, [now, "filled", side, entryPrice, "", "", qty, ""])
+        _appendRow(ORDERS_FILE, [now, "filled", side, entryPrice, "", "", qty, "", "", ""])
         return {"fill_time": now, "side": side, "entry_price": entryPrice, "size": qty}
 
     def recordClose(self, fillInfo: dict, exitPrice: float):

@@ -13,6 +13,7 @@ class MakerStrategy:
         self.client = client
         self.tracker = OrderTracker()
         self.lastMarkPrice = 0
+        self.leverage = 10
 
     def run(self):
         logger.info(
@@ -25,6 +26,13 @@ class MakerStrategy:
                 config.uptimeSize, config.uptimeSpreadBps,
             )
         self.client.login()
+
+        try:
+            posConfig = self.client.getPositionConfig(config.symbol)
+            self.leverage = int(float(posConfig.get("leverage", 10)))
+            logger.info("Current leverage: %dx", self.leverage)
+        except Exception as e:
+            logger.warning("Failed to get position config: %s, using default %dx", e, self.leverage)
 
         while True:
             try:
@@ -62,17 +70,50 @@ class MakerStrategy:
             self._cancelAll()
 
             fillInfo = self.tracker.recordFill(fillSide, absQty, entryPrice)
-
-            try:
-                self.client.marketClose(closeSide, absQty)
-                closePrice = self.client.getMarkPrice()
-                self.tracker.recordClose(fillInfo, closePrice)
-            except Exception as e:
-                logger.error("Failed to close position: %s", e)
-
+            self._closePosition(closeSide, absQty, fillInfo)
             self.tracker.printStats()
             return True
         return False
+
+    def _closePosition(self, closeSide: str, qty: float, fillInfo: dict):
+        markPrice = self.client.getMarkPrice()
+        limitPrice = round(markPrice, 2)
+        logger.info("Attempting limit close: %s %s @ %.2f (30s timeout)", closeSide, qty, limitPrice)
+
+        try:
+            self.client.limitClose(closeSide, limitPrice, qty)
+        except Exception as e:
+            logger.error("Limit close failed: %s, falling back to market", e)
+            self._marketCloseAndRecord(closeSide, qty, fillInfo)
+            return
+
+        deadline = time.time() + 30
+        while time.time() < deadline:
+            time.sleep(1)
+            positions = self.client.getPositions(config.symbol)
+            currentQty = 0
+            for pos in positions:
+                if abs(float(pos.get("qty", 0))) > 0:
+                    currentQty = float(pos.get("qty", 0))
+                    break
+
+            if currentQty == 0:
+                closePrice = self.client.getMarkPrice()
+                logger.info("Limit close filled")
+                self.tracker.recordClose(fillInfo, closePrice)
+                return
+
+        logger.info("Limit close timeout, cancelling and using market order")
+        self._cancelAll()
+        self._marketCloseAndRecord(closeSide, qty, fillInfo)
+
+    def _marketCloseAndRecord(self, closeSide: str, qty: float, fillInfo: dict):
+        try:
+            self.client.marketClose(closeSide, qty)
+            closePrice = self.client.getMarkPrice()
+            self.tracker.recordClose(fillInfo, closePrice)
+        except Exception as e:
+            logger.error("Market close failed: %s", e)
 
     def _refreshOrders(self):
         self._cancelAll()
@@ -95,13 +136,13 @@ class MakerStrategy:
 
         try:
             result = self.client.newOrder("buy", bidPrice, size)
-            self.tracker.recordPlace(result.get("request_id"), "buy", bidPrice, markPrice, spreadBps, size)
+            self.tracker.recordPlace(result.get("request_id"), "buy", bidPrice, markPrice, spreadBps, size, self.leverage)
         except Exception as e:
             logger.error("[%s] Failed to place bid: %s", label, e)
 
         try:
             result = self.client.newOrder("sell", askPrice, size)
-            self.tracker.recordPlace(result.get("request_id"), "sell", askPrice, markPrice, spreadBps, size)
+            self.tracker.recordPlace(result.get("request_id"), "sell", askPrice, markPrice, spreadBps, size, self.leverage)
         except Exception as e:
             logger.error("[%s] Failed to place ask: %s", label, e)
 

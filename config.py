@@ -15,6 +15,9 @@ uptimeEnabled = os.getenv("UPTIME_ENABLED", "false").lower() == "true"
 uptimeSize = float(os.getenv("UPTIME_SIZE", "0.001"))
 uptimeSpreadBps = float(os.getenv("UPTIME_SPREAD_BPS", "8"))
 
+telegramBotToken = os.getenv("TELEGRAM_BOT_TOKEN", "")
+telegramChatId = os.getenv("TELEGRAM_CHAT_ID", "")
+
 BASE_URL = "https://perps.standx.com"
 AUTH_URL = "https://api.standx.com"
 CHAIN = "bsc"

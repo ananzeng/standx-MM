@@ -3,6 +3,7 @@ import time
 
 from client import StandXClient
 from tracker import OrderTracker
+from notifier import sendTelegram
 import config
 
 logger = logging.getLogger(__name__)
@@ -14,6 +15,7 @@ class MakerStrategy:
         self.tracker = OrderTracker()
         self.lastMarkPrice = 0
         self.leverage = 10
+        self.cooldownUntil = 0
 
     def run(self):
         logger.info(
@@ -70,7 +72,10 @@ class MakerStrategy:
             self._cancelAll()
 
             fillInfo = self.tracker.recordFill(fillSide, absQty, entryPrice)
+            sendTelegram(f"🔔 Filled: {fillSide} {absQty} {config.symbol} @ {entryPrice:.2f}")
             self._closePosition(closeSide, absQty, fillInfo)
+            self.cooldownUntil = time.time() + 300
+            logger.info("Cooldown activated for 5 minutes (spread x2)")
             self.tracker.printStats()
             return True
         return False
@@ -100,7 +105,13 @@ class MakerStrategy:
             if currentQty == 0:
                 closePrice = self.client.getMarkPrice()
                 logger.info("Limit close filled")
-                self.tracker.recordClose(fillInfo, closePrice)
+                closeInfo = self.tracker.recordClose(fillInfo, closePrice)
+                sign = "+" if closeInfo["pnl_usd"] >= 0 else ""
+                sendTelegram(
+                    f"✅ Closed (limit): {closeSide} {qty} {config.symbol}\n"
+                    f"entry={closeInfo['entry_price']:.2f} exit={closeInfo['exit_price']:.2f}\n"
+                    f"PnL={sign}{closeInfo['pnl_usd']:.4f} USD ({sign}{closeInfo['pnl_bps']:.2f}bps)"
+                )
                 return
 
         logger.info("Limit close timeout, cancelling and using market order")
@@ -111,9 +122,16 @@ class MakerStrategy:
         try:
             self.client.marketClose(closeSide, qty)
             closePrice = self.client.getMarkPrice()
-            self.tracker.recordClose(fillInfo, closePrice)
+            closeInfo = self.tracker.recordClose(fillInfo, closePrice)
+            sign = "+" if closeInfo["pnl_usd"] >= 0 else ""
+            sendTelegram(
+                f"✅ Closed (market): {closeSide} {qty} {config.symbol}\n"
+                f"entry={closeInfo['entry_price']:.2f} exit={closeInfo['exit_price']:.2f}\n"
+                f"PnL={sign}{closeInfo['pnl_usd']:.4f} USD ({sign}{closeInfo['pnl_bps']:.2f}bps)"
+            )
         except Exception as e:
             logger.error("Market close failed: %s", e)
+            sendTelegram(f"❌ Market close failed: {e}")
 
     def _refreshOrders(self):
         self._cancelAll()
@@ -121,7 +139,13 @@ class MakerStrategy:
         markPrice = self.client.getMarkPrice()
         self.lastMarkPrice = markPrice
 
-        self._placeLayer("main", markPrice, config.spreadBps, config.orderSize)
+        mainSpreadBps = config.spreadBps
+        if time.time() < self.cooldownUntil:
+            mainSpreadBps = config.spreadBps * 2
+            remaining = int(self.cooldownUntil - time.time())
+            logger.info("Cooldown active (%ds left), main spread=%sbps", remaining, mainSpreadBps)
+
+        self._placeLayer("main", markPrice, mainSpreadBps, config.orderSize)
 
         if config.uptimeEnabled:
             self._placeLayer("uptime", markPrice, config.uptimeSpreadBps, config.uptimeSize)

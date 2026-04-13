@@ -66,7 +66,7 @@ class OrderTracker:
         _appendRow(ORDERS_FILE, [now, "filled", side, entryPrice, "", "", qty, "", "", ""])
         return {"fill_time": now, "side": side, "entry_price": entryPrice, "size": qty}
 
-    def recordClose(self, fillInfo: dict, exitPrice: float):
+    def recordClose(self, fillInfo: dict, exitPrice: float) -> dict:
         now = _now()
         side = fillInfo["side"]
         entryPrice = fillInfo["entry_price"]
@@ -86,6 +86,8 @@ class OrderTracker:
 
         logger.info("Trade closed: %s %s entry=%.2f exit=%.2f pnl=%.4f USD (%.2fbps)",
                      side, size, entryPrice, exitPrice, pnlUsd, pnlBps)
+
+        return {"entry_price": entryPrice, "exit_price": exitPrice, "size": size, "pnl_usd": pnlUsd, "pnl_bps": pnlBps}
 
     def printStats(self):
         if not os.path.exists(TRADES_FILE):
